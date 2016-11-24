@@ -123,13 +123,6 @@ bool IsSymbol(unsigned long address)
 			return true;
 		}
 	}
-	for (int i = 0; i < JumpTargetSymbols.Count(); i++)
-	{
-		if (address == JumpTargetSymbols[i].Address)
-		{
-			return true;
-		}
-	}
 	return false;
 }
 Symbol &FindSymbol(unsigned long address)
@@ -169,6 +162,10 @@ Symbol &FindSymbol(unsigned long address)
 			return JumpTableSymbols[i];
 		}
 	}
+	UL_UNREACHABLE;
+}
+Symbol &FindJumpTargetSymbol(unsigned long address)
+{
 	for (int i = 0; i < JumpTargetSymbols.Count(); i++)
 	{
 		if (address == JumpTargetSymbols[i].Address)
@@ -178,7 +175,7 @@ Symbol &FindSymbol(unsigned long address)
 	}
 	UL_UNREACHABLE;
 }
-Symbol &FindJumpTargetCodeSymbol(unsigned long address)
+Symbol &FindJumpCodeSymbol(unsigned long address)
 {
 	for (int i = 0; i < CodeSymbols.Count(); i++)
 	{
@@ -206,17 +203,20 @@ void ParseCodeSymbol(Symbol &sym)
 				if ((operand->type == UD_OP_MEM || operand->type == UD_OP_IMM) && IsSymbol(operand->lval.udword))
 				{
 					unsigned int len = ud_insn_len(&ud_obj);
-					const uint8_t *ptr = ud_insn_ptr(&ud_obj);
-					Symbol &fsym = FindSymbol(operand->lval.udword);
-					uint8_t *buf = (uint8_t *)memmem(ptr, len, &operand->lval.udword, 4);
-					buf[0] = 0;
-					buf[1] = 0;
-					buf[2] = 0;
-					buf[3] = 0;
-					RelocationEntry r;
-					r.Rva = buf - sym.Data;
-					r.Symbol = &fsym;
-					sym.Relocations.Add(r);
+					if (len > 4)
+					{
+						const uint8_t *ptr = ud_insn_ptr(&ud_obj);
+						Symbol &fsym = FindSymbol(operand->lval.udword);
+						uint8_t *buf = (uint8_t *)memmem(ptr, len, &operand->lval.udword, 4);
+						buf[0] = 0;
+						buf[1] = 0;
+						buf[2] = 0;
+						buf[3] = 0;
+						RelocationEntry r;
+						r.Rva = buf - sym.Data;
+						r.Symbol = &fsym;
+						sym.Relocations.Add(r);
+					}
 				}
 				else if (operand->type == UD_OP_JIMM && operand->size == 32)
 				{
@@ -291,7 +291,7 @@ int main(int argc, char *argv[])
 		sym.Address = ini->Get_Int(sym.Name, "Address", 0);
 		sym.FileAddress = ini->Get_Int(sym.Name, "FileAddress", 0);
 		sym.Size = ini->Get_Int(sym.Name, "Size", 0);
-		sym.CodeSize = ini->Get_Int(sym.Name, "CodeSize", 0);
+		sym.CodeSize = ini->Get_Int(sym.Name, "CodeSize", sym.Size);
 		sym.Selection = (BYTE)ini->Get_Int(sym.Name, "Selection", IMAGE_COMDAT_SELECT_NODUPLICATES);
 		if (sym.Size)
 		{
@@ -366,6 +366,7 @@ int main(int argc, char *argv[])
 		const char *jumptablesym = ini->Get_Entry("JumpTableSymbols", i);
 		ini->Get_String(sym.Name, "JumpTableSymbols", jumptablesym, 0);
 		sym.Address = ini->Get_Int(sym.Name, "Address", 0);
+		sym.Size = ini->Get_Int(sym.Name, "Size", 0);
 		JumpTableSymbols.Add(sym);
 	}
 	int jumptargetcount = ini->Entry_Count("JumpTargetSymbols");
@@ -382,6 +383,21 @@ int main(int argc, char *argv[])
 		if (CodeSymbols[i].Size)
 		{
 			ParseCodeSymbol(CodeSymbols[i]);
+		}
+	}
+	for (int i = 0; i < JumpTableSymbols.Count(); i++)
+	{
+		unsigned long JumpTableCount = JumpTableSymbols[i].Size / 4;
+		Symbol &JumpTableCodeSym = FindJumpCodeSymbol(JumpTableSymbols[i].Address);
+		unsigned long *JumpTableData = (unsigned long *)((JumpTableSymbols[i].Address - JumpTableCodeSym.Address) + JumpTableCodeSym.Data);
+		for (unsigned int j = 0; j < JumpTableCount; j++)
+		{
+			Symbol &JumpTargetSymbol = FindJumpTargetSymbol(JumpTableData[j]);
+			JumpTableData[j] = 0;
+			RelocationEntry r;
+			r.Rva = ((unsigned char *)(&JumpTableData[j])) - JumpTableCodeSym.Data;
+			r.Symbol = &JumpTargetSymbol;
+			JumpTableCodeSym.Relocations.Add(r);
 		}
 	}
 	int symbolcount = 0;
@@ -401,6 +417,18 @@ int main(int argc, char *argv[])
 			symbolcount++;
 			sectioncount++;
 		}
+	}
+	for (int i = 0; i < JumpTableSymbols.Count(); i++)
+	{
+		symbolcount++;
+		stringtablesize += JumpTableSymbols[i].Name.Get_Length();
+		stringtablesize++;
+	}
+	for (int i = 0; i < JumpTargetSymbols.Count(); i++)
+	{
+		symbolcount++;
+		stringtablesize += JumpTargetSymbols[i].Name.Get_Length();
+		stringtablesize++;
 	}
 	for (int i = 0; i < RDataSymbols.Count(); i++)
 	{
@@ -752,6 +780,44 @@ int main(int argc, char *argv[])
 		strpos += CodeSymbols[i].Name.Get_Length();
 		strpos++;
 		stroffset += CodeSymbols[i].Name.Get_Length();
+		stroffset++;
+	}
+	for (int i = 0; i < JumpTableSymbols.Count(); i++)
+	{
+		Symbol &JumpTableCodeSym = FindJumpCodeSymbol(JumpTableSymbols[i].Address);
+		JumpTableSymbols[i].EntrySymbolNumber = cursymnum;
+		symbols[cursymbol].symbol.N.Name.Short = 0;
+		symbols[cursymbol].symbol.N.Name.Long = stroffset;
+		symbols[cursymbol].symbol.Value = JumpTableSymbols[i].Address - JumpTableCodeSym.Address;
+		symbols[cursymbol].symbol.SectionNumber = (SHORT)JumpTableCodeSym.SectionNumber;
+		symbols[cursymbol].symbol.Type = 0;
+		symbols[cursymbol].symbol.StorageClass = IMAGE_SYM_CLASS_STATIC;
+		symbols[cursymbol].symbol.NumberOfAuxSymbols = 0;
+		cursymbol++;
+		cursymnum++;
+		strcpy(strpos, JumpTableSymbols[i].Name.Peek_Buffer());
+		strpos += JumpTableSymbols[i].Name.Get_Length();
+		strpos++;
+		stroffset += JumpTableSymbols[i].Name.Get_Length();
+		stroffset++;
+	}
+	for (int i = 0; i < JumpTargetSymbols.Count(); i++)
+	{
+		Symbol &JumpTableCodeSym = FindJumpCodeSymbol(JumpTargetSymbols[i].Address);
+		JumpTargetSymbols[i].EntrySymbolNumber = cursymnum;
+		symbols[cursymbol].symbol.N.Name.Short = 0;
+		symbols[cursymbol].symbol.N.Name.Long = stroffset;
+		symbols[cursymbol].symbol.Value = JumpTargetSymbols[i].Address - JumpTableCodeSym.Address;
+		symbols[cursymbol].symbol.SectionNumber = (SHORT)JumpTableCodeSym.SectionNumber;
+		symbols[cursymbol].symbol.Type = 0;
+		symbols[cursymbol].symbol.StorageClass = IMAGE_SYM_CLASS_LABEL;
+		symbols[cursymbol].symbol.NumberOfAuxSymbols = 0;
+		cursymbol++;
+		cursymnum++;
+		strcpy(strpos, JumpTargetSymbols[i].Name.Peek_Buffer());
+		strpos += JumpTargetSymbols[i].Name.Get_Length();
+		strpos++;
+		stroffset += JumpTargetSymbols[i].Name.Get_Length();
 		stroffset++;
 	}
 	for (int i = 0; i < RDataSymbols.Count(); i++)
