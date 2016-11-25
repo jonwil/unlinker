@@ -200,23 +200,35 @@ void ParseCodeSymbol(Symbol &sym)
 			const ud_operand *operand = ud_insn_opr(&ud_obj, i);
 			if (operand)
 			{
-				if ((operand->type == UD_OP_MEM || operand->type == UD_OP_IMM) && IsSymbol(operand->lval.udword))
+				if (operand->type == UD_OP_MEM && operand->offset == 32 && IsSymbol(operand->lval.udword))
 				{
 					unsigned int len = ud_insn_len(&ud_obj);
-					if (len > 4)
-					{
-						const uint8_t *ptr = ud_insn_ptr(&ud_obj);
-						Symbol &fsym = FindSymbol(operand->lval.udword);
-						uint8_t *buf = (uint8_t *)memmem(ptr, len, &operand->lval.udword, 4);
-						buf[0] = 0;
-						buf[1] = 0;
-						buf[2] = 0;
-						buf[3] = 0;
-						RelocationEntry r;
-						r.Rva = buf - sym.Data;
-						r.Symbol = &fsym;
-						sym.Relocations.Add(r);
-					}
+					const uint8_t *ptr = ud_insn_ptr(&ud_obj);
+					Symbol &fsym = FindSymbol(operand->lval.udword);
+					uint8_t *buf = (uint8_t *)memmem(ptr, len, &operand->lval.udword, 4);
+					buf[0] = 0;
+					buf[1] = 0;
+					buf[2] = 0;
+					buf[3] = 0;
+					RelocationEntry r;
+					r.Rva = buf - sym.Data;
+					r.Symbol = &fsym;
+					sym.Relocations.Add(r);
+				}
+				else if (operand->type == UD_OP_IMM && IsSymbol(operand->lval.udword))
+				{
+					unsigned int len = ud_insn_len(&ud_obj);
+					const uint8_t *ptr = ud_insn_ptr(&ud_obj);
+					Symbol &fsym = FindSymbol(operand->lval.udword);
+					uint8_t *buf = (uint8_t *)memmem(ptr, len, &operand->lval.udword, 4);
+					buf[0] = 0;
+					buf[1] = 0;
+					buf[2] = 0;
+					buf[3] = 0;
+					RelocationEntry r;
+					r.Rva = buf - sym.Data;
+					r.Symbol = &fsym;
+					sym.Relocations.Add(r);
 				}
 				else if (operand->type == UD_OP_JIMM && operand->size == 32)
 				{
