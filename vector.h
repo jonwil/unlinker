@@ -1,5 +1,7 @@
 #pragma once
 #include "CriticalSectionClass.h"
+#include <new>
+
 template <typename T> class NoEqualsClass
 {
 public:
@@ -55,14 +57,15 @@ public:
 			VectorMax = vector.Length();
 			if (VectorMax)
 			{
-				Vector = new T[VectorMax];
-				if (Vector)
-				{
+				try {
+					Vector = new T[VectorMax];
 					IsAllocated = true;
 					for (int index = 0; index < VectorMax; index++)
 					{
 						Vector[index] = vector[index];
 					}
+				}
+				catch (std::bad_alloc& ba) {
 				}
 			}
 			else
@@ -1226,11 +1229,12 @@ public:
 		if (amount >= 0)
 		{
 			int newsize = IndexSize + amount;
-			NodeElement *newindex = new NodeElement[newsize];
-			if (newindex)
-			{
+
+			NodeElement *newindex;
+			try {
+				newindex = new NodeElement[newsize];
 				UL_ASSERT(IndexCount < newsize);
-				for (int i = 0;i < this->IndexCount;i++)
+				for (int i = 0; i < this->IndexCount; i++)
 				{
 					newindex[i].ID = IndexTable[i].ID;
 					newindex[i].Data = IndexTable[i].Data;
@@ -1241,6 +1245,8 @@ public:
 				IndexSize += amount;
 				Invalidate_Archive();
 				return true;
+			}
+			catch (std::bad_alloc& ba) {
 			}
 		}
 		return false;
