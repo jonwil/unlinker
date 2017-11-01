@@ -114,12 +114,17 @@ int INIClass::Load(Straw& straw)
 						line[0] = ' ';
 						*strchr(line, ']') = '\0';
 						strtrim(line);
-						INISection* section = new INISection(newstr(line));
-						if (!section)
-						{
-								Clear(0, 0);
-								return false;
+
+						INISection* section;
+
+						try {
+							section = new INISection(newstr(line));
 						}
+						catch (std::bad_alloc& ba) {
+							Clear(0, 0);
+							return false;
+						}
+
 						while (!isLastLine)
 						{
 								int count = Read_Line(cacheStraw, line, 512, isLastLine);
@@ -146,13 +151,17 @@ int INIClass::Load(Straw& straw)
 																		{
 																				continue;
 																		}
-																		INIEntry* entry = new INIEntry(newstr(key), newstr(value));
-																		if (!entry)
-																		{
-																				delete section;
-																				Clear(0, 0);
-																				return false;
+
+																		INIEntry* entry;
+																		try {
+																			entry = new INIEntry(newstr(key), newstr(value));
 																		}
+																		catch (std::bad_alloc& ba) {
+																			delete section;
+																			Clear(0, 0);
+																			return false;
+																		}
+
 																		uint32 crc = CRC_String(entry->Entry, 0);
 																		if (section->EntryIndex.Is_Present(crc))
 																				DuplicateCRCError(__FUNCTION__, section->Section, line);
